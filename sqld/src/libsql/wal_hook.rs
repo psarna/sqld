@@ -105,7 +105,7 @@ impl WalMethodsHook {
 }
 #[allow(non_snake_case)]
 pub extern "C" fn xOpen(
-    vfs: *const sqlite3_vfs,
+    vfs: *mut sqlite3_vfs,
     db_file: *mut sqlite3_file,
     wal_name: *const c_char,
     no_shm_mode: i32,
@@ -117,7 +117,7 @@ pub extern "C" fn xOpen(
         std::ffi::CStr::from_ptr(wal_name).to_str().unwrap()
     });
     let ref_methods = unsafe { &*(methods as *mut WalMethodsHook) };
-    let origxOpen = unsafe { (*ref_methods.underlying_methods).xOpen };
+    let origxOpen = unsafe { (*ref_methods.underlying_methods).xOpen.unwrap() };
     (origxOpen)(vfs, db_file, wal_name, no_shm_mode, max_size, methods, wal)
 }
 
@@ -139,55 +139,55 @@ pub extern "C" fn xClose(
     z_buf: *mut u8,
 ) -> c_int {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xClose)(wal, db, sync_flags, n_buf, z_buf)
+    (orig_methods.xClose.unwrap())(wal, db, sync_flags, n_buf, z_buf)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xLimit(wal: *mut Wal, limit: i64) {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xLimit)(wal, limit)
+    (orig_methods.xLimit.unwrap())(wal, limit)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xBeginReadTransaction(wal: *mut Wal, changed: *mut i32) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xBeginReadTransaction)(wal, changed)
+    (orig_methods.xBeginReadTransaction.unwrap())(wal, changed)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xEndReadTransaction(wal: *mut Wal) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xEndReadTransaction)(wal)
+    (orig_methods.xEndReadTransaction.unwrap())(wal)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xFindFrame(wal: *mut Wal, pgno: u32, frame: *mut u32) -> c_int {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xFindFrame)(wal, pgno, frame)
+    (orig_methods.xFindFrame.unwrap())(wal, pgno, frame)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xReadFrame(wal: *mut Wal, frame: u32, n_out: c_int, p_out: *mut u8) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xReadFrame)(wal, frame, n_out, p_out)
+    (orig_methods.xReadFrame.unwrap())(wal, frame, n_out, p_out)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xDbSize(wal: *mut Wal) -> u32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xDbSize)(wal)
+    (orig_methods.xDbSize.unwrap())(wal)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xBeginWriteTransaction(wal: *mut Wal) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xBeginWriteTransaction)(wal)
+    (orig_methods.xBeginWriteTransaction.unwrap())(wal)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xEndWriteTransaction(wal: *mut Wal) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xEndWriteTransaction)(wal)
+    (orig_methods.xEndWriteTransaction.unwrap())(wal)
 }
 
 #[allow(non_snake_case)]
@@ -204,13 +204,13 @@ pub extern "C" fn xUndo(
 #[allow(non_snake_case)]
 pub extern "C" fn xSavepoint(wal: *mut Wal, wal_data: *mut u32) {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xSavepoint)(wal, wal_data)
+    (orig_methods.xSavepoint.unwrap())(wal, wal_data)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xSavepointUndo(wal: *mut Wal, wal_data: *mut u32) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xSavepointUndo)(wal, wal_data)
+    (orig_methods.xSavepointUndo.unwrap())(wal, wal_data)
 }
 
 #[allow(non_snake_case)]
@@ -252,7 +252,7 @@ pub extern "C" fn xCheckpoint(
     backfilled_frames: *mut c_int,
 ) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xCheckpoint)(
+    (orig_methods.xCheckpoint.unwrap())(
         wal,
         db,
         emode,
@@ -275,25 +275,25 @@ pub extern "C" fn xCallback(wal: *mut Wal) -> i32 {
 #[allow(non_snake_case)]
 pub extern "C" fn xExclusiveMode(wal: *mut Wal, op: c_int) -> c_int {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xExclusiveMode)(wal, op)
+    (orig_methods.xExclusiveMode.unwrap())(wal, op)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xHeapMemory(wal: *mut Wal) -> i32 {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xHeapMemory)(wal)
+    (orig_methods.xHeapMemory.unwrap())(wal)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xFile(wal: *mut Wal) -> *const c_void {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xFile)(wal)
+    (orig_methods.xFile.unwrap())(wal)
 }
 
 #[allow(non_snake_case)]
 pub extern "C" fn xDb(wal: *mut Wal, db: *const c_void) {
     let orig_methods = unsafe { get_orig_methods(wal) };
-    (orig_methods.xDb)(wal, db)
+    (orig_methods.xDb.unwrap())(wal, db)
 }
 
 #[allow(non_snake_case)]
