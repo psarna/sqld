@@ -3,7 +3,9 @@
 members = [
     "sqlc",
     "sqld",
+    "turso",
 ]
+default-members = [ "sqlc", "sqld" ]
 
 [patch."https://github.com/psarna/mvsqlite"]
 mvfs = { git = "https://github.com/MarinPostma/mvsqlite", branch = "use-cchar" }
