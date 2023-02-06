@@ -63,6 +63,7 @@ pub struct Config {
     pub rpc_server_cert: Option<PathBuf>,
     pub rpc_server_key: Option<PathBuf>,
     pub rpc_server_ca_cert: Option<PathBuf>,
+    pub enable_bottomless_replication: bool,
 }
 
 async fn run_service<S>(service: S, config: Config) -> anyhow::Result<()>
@@ -144,6 +145,10 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         ))
     });
 
+    if config.enable_bottomless_replication {
+        bottomless::static_init::register_bottomless_methods();
+    }
+
     match config.writer_rpc_addr {
         Some(ref addr) => {
             let factory = WriteProxyDbFactory::new(
@@ -176,6 +181,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
                         #[cfg(feature = "mwal_backend")]
                         vwal_methods,
                         hook,
+                        config.enable_bottomless_replication,
                     )
                 }
             };
