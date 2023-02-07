@@ -23,6 +23,9 @@ pub use cell_value::CellValue;
 #[cfg(feature = "workers_backend")]
 pub mod workers;
 
+#[cfg(feature = "spin_backend")]
+pub mod spin;
+
 /// Metadata of a database request
 #[derive(Clone, Debug, Default)]
 pub struct Meta {
