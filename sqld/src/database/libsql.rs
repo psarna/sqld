@@ -204,6 +204,48 @@ fn open_db(
     }
 }
 
+fn init_postgres_tables(conn: &rusqlite::Connection) -> Result<()> {
+    let payload = &[
+        // FIXME: everything below should be virtual tables that return actual schema information
+        "attach database 'file::memory:' AS pg_catalog",
+        "create table if not exists pg_catalog.pg_type(oid, typname, typnamespace, typowner, typlen, typbyval, typtype, typcategory, typispreferred, typisdefined, typdelim, typrelid, typsubscript, typelem, typarray, typinput, typoutput, typreceive, typsend, typmodin, typmodout, typanalyze, typalign, typstorage, typnotnull, typbasetype, typtypmod, typndims, typcollation, typdefaultbin, typdefault, typacl);",
+        "create table if not exists pg_catalog.pg_class(oid, relname, relnamespace, reltype, reloftype, relowner, relam, relfilenode, reltablespace, relpages, reltuples, relallvisible, reltoastrelid, relhasindex, relisshared, relpersistence, relkind, relnatts, relchecks, relhasrules, relhastriggers, relhassubclass, relrowsecurity, relforcerowsecurity, relispopulated, relreplident, relispartition, relrewrite, relfrozenxid, relminxid, relacl, reloptions, relpartbound)",
+        "create table if not exists pg_catalog.pg_description(objoid, classoid, objsubid, description)",
+        "create table if not exists pg_catalog.pg_namespace(oid, nspname, nspowner, nspacl)",
+        "create table if not exists pg_catalog.pg_tablespace(oid, spcname, spcowner, spcacl, spcoptions)",
+
+        "insert into pg_catalog.pg_namespace values (99, 'pg_toast', 10, null)",
+        "insert into pg_catalog.pg_namespace values (11, 'pg_catalog', 10, null)",
+        "insert into pg_catalog.pg_namespace values (2200, 'public', 10, null)",
+        "insert into pg_catalog.pg_namespace values (13427, 'information_schema', 10, null)",
+
+        "insert into pg_catalog.pg_description values (11, 2615, 0, 'system catalog schema')",
+        "insert into pg_catalog.pg_description values (99, 2615, 0, 'reserved schema for TOAST tables')",
+        "insert into pg_catalog.pg_description values (2200, 2615, 0, 'standard public schema')",
+
+        // FIXME: this is just a small sample, this monstrosity needs to be loaded from the 'libsql_pg_type_payload.sql' file. Or maybe we just attach a preloaded database
+        // with all the tables alrady in place, instead of loading the contents on boot.
+        "INSERT INTO pg_catalog.pg_type  VALUES (16, 'bool', 11, 10, 1, true, 'b', 'B', true, true, ',', 0, '-', 0, 1000, 'boolin', 'boolout', 'boolrecv', 'boolsend', '-', '-', '-', 'c', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (17, 'bytea', 11, 10, -1, false, 'b', 'U', false, true, ',', 0, '-', 0, 1001, 'byteain', 'byteaout', 'bytearecv', 'byteasend', '-', '-', '-', 'i', 'x', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (18, 'char', 11, 10, 1, true, 'b', 'Z', false, true, ',', 0, '-', 0, 1002, 'charin', 'charout', 'charrecv', 'charsend', '-', '-', '-', 'c', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (19, 'name', 11, 10, 64, false, 'b', 'S', false, true, ',', 0, 'raw_array_subscript_handler', 18, 1003, 'namein', 'nameout', 'namerecv', 'namesend', '-', '-', '-', 'c', 'p', false, 0, -1, 0, 950, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (20, 'int8', 11, 10, 8, true, 'b', 'N', false, true, ',', 0, '-', 0, 1016, 'int8in', 'int8out', 'int8recv', 'int8send', '-', '-', '-', 'd', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (21, 'int2', 11, 10, 2, true, 'b', 'N', false, true, ',', 0, '-', 0, 1005, 'int2in', 'int2out', 'int2recv', 'int2send', '-', '-', '-', 's', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (22, 'int2vector', 11, 10, -1, false, 'b', 'A', false, true, ',', 0, 'array_subscript_handler', 21, 1006, 'int2vectorin', 'int2vectorout', 'int2vectorrecv', 'int2vectorsend', '-', '-', '-', 'i', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (23, 'int4', 11, 10, 4, true, 'b', 'N', false, true, ',', 0, '-', 0, 1007, 'int4in', 'int4out', 'int4recv', 'int4send', '-', '-', '-', 'i', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (24, 'regproc', 11, 10, 4, true, 'b', 'N', false, true, ',', 0, '-', 0, 1008, 'regprocin', 'regprocout', 'regprocrecv', 'regprocsend', '-', '-', '-', 'i', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (25, 'text', 11, 10, -1, false, 'b', 'S', true, true, ',', 0, '-', 0, 1009, 'textin', 'textout', 'textrecv', 'textsend', '-', '-', '-', 'i', 'x', false, 0, -1, 0, 100, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (26, 'oid', 11, 10, 4, true, 'b', 'N', true, true, ',', 0, '-', 0, 1028, 'oidin', 'oidout', 'oidrecv', 'oidsend', '-', '-', '-', 'i', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (27, 'tid', 11, 10, 6, false, 'b', 'U', false, true, ',', 0, '-', 0, 1010, 'tidin', 'tidout', 'tidrecv', 'tidsend', '-', '-', '-', 's', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (28, 'xid', 11, 10, 4, true, 'b', 'U', false, true, ',', 0, '-', 0, 1011, 'xidin', 'xidout', 'xidrecv', 'xidsend', '-', '-', '-', 'i', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+        "INSERT INTO pg_catalog.pg_type  VALUES (29, 'cid', 11, 10, 4, true, 'b', 'U', false, true, ',', 0, '-', 0, 1012, 'cidin', 'cidout', 'cidrecv', 'cidsend', '-', '-', '-', 'i', 'p', false, 0, -1, 0, 0, NULL, NULL, NULL);",
+    ];
+    for stmt in payload {
+        conn.execute(stmt, ())?;
+    }
+    Ok(())
+}
+
 impl LibSqlDb {
     pub fn new(
         path: impl AsRef<Path> + Send + 'static,
@@ -214,7 +256,7 @@ impl LibSqlDb {
 
         tokio::task::spawn_blocking(move || {
             let conn = open_db(path, wal_hook, with_bottomless).unwrap();
-
+            init_postgres_tables(&conn).unwrap();
             let mut state = ConnectionState::initial();
             let mut timedout = false;
             loop {

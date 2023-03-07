@@ -121,7 +121,58 @@ impl Statement {
         })
     }
 
+    pub fn rewrite_if_postgres(s: &str) -> String {
+        if s.contains("SELECT c.oid,c.*,d.description,pg_catalog.pg_get_expr(c.relpartbound, c.oid) as partition_expr,  pg_catalog.pg_get_partkeydef(c.oid) as partition_key") {
+            return "SELECT * FROM pg_catalog.pg_class WHERE relnamespace = ? AND relkind not in ('i','I','c')".to_string();
+        }
+        if s.contains(
+            "SELECT c.contoencoding as encid,pg_catalog.pg_encoding_to_char(c.contoencoding)",
+        ) {
+            return "SELECT 6 as encid, 'UTF8' as encname".to_string();
+        }
+        /* postlite:
+        func rewriteQuery(q string) string {
+            // Ignore SET queries by rewriting them to empty resultsets.
+            if strings.HasPrefix(q, "SET ") {
+                return `SELECT 'SET'`
+            }
+
+            // Ignore this god forsaken query for pulling keywords.
+            if strings.Contains(q, `select string_agg(word, ',') from pg_catalog.pg_get_keywords()`) {
+                return `SELECT '' AS "string_agg" WHERE 1 = 2`
+            }
+
+            // Rewrite system information variables so they are functions so we can inject them.
+            // https://www.postgresql.org/docs/9.1/functions-info.html
+            q = systemFunctionRegex.ReplaceAllString(q, "$1()$2")
+
+            // Rewrite double-colon casting by simply removing it.
+            // https://www.postgresql.org/docs/7.3/sql-expressions.html#SQL-SYNTAX-TYPE-CASTS
+            q = castRegex.ReplaceAllString(q, "")
+
+            // Remove references to the pg_catalog.
+            // q = pgCatalogRegex.ReplaceAllString(q, "")
+
+            // Rewrite "SHOW" commands into function calls.
+            q = showRegex.ReplaceAllString(q, "SELECT show('$1')")
+
+            return q
+        }
+        */
+        s.to_string()
+            .replace("::regclass", "")
+            .replace("$1", "?")
+            .replace("$2", "?")
+            .replace("$3", "?")
+            .replace("$4", "?")
+            .replace("$5", "?")
+            .replace("$6", "?") // FIXME: regex instead of handcoded numbers
+    }
+
     pub fn parse(s: &str) -> impl Iterator<Item = Result<Self>> + '_ {
+        println!("Before: {s}");
+        let s = Self::rewrite_if_postgres(s);
+        println!("After: {s}");
         fn parse_inner(c: Cmd) -> Result<Statement> {
             let kind =
                 StmtKind::kind(&c).ok_or_else(|| anyhow::anyhow!("unsupported statement"))?;
@@ -141,7 +192,7 @@ impl Statement {
         // on the heap:
         // - https://github.com/gwenn/lemon-rs/issues/8
         // - https://github.com/gwenn/lemon-rs/pull/19
-        let mut parser = Box::new(Parser::new(s.as_bytes()));
+        let mut parser = Box::new(Parser::new(s.as_bytes().to_vec()));
         std::iter::from_fn(move || match parser.next() {
             Ok(Some(cmd)) => Some(parse_inner(cmd)),
             Ok(None) => None,
