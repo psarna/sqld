@@ -16,7 +16,13 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::os::raw::{c_char, c_int, c_void};
 use std::rc::Rc;
-use tracing::trace;
+//use tracing::trace;
+//FIXME: temporary measure for DBeaver
+macro_rules! trace {
+    ($($arg:tt)*) => {{
+        println!($($arg)*);
+    }};
+}
 use unwrap_or::unwrap_ok_or;
 
 thread_local! {
@@ -35,6 +41,7 @@ macro_rules! define_stub {
         pub extern "C" fn $name() -> c_int {
             let func_name = std::stringify!($name);
             trace!("STUB {}", func_name);
+            println!("STUB {func_name}");
             set_error_message(format!("{} not implemented", func_name));
             SQLITE_ERROR
         }
@@ -316,6 +323,11 @@ pub extern "C" fn sqlite3_prepare_v2(
         return SQLITE_ERROR;
     });
     let sql = sql.to_string();
+    //FIXME: SARNA
+    let sql = sql
+        .replace("limit 0", "limit 1")
+        .replace("LIMIT 0", "LIMIT 1");
+    trace!("QUERY v2: {sql}");
     unsafe {
         let stmt = Statement::new(database, sql);
         let ptr = Box::new(sqlite3_stmt { inner: stmt });
@@ -325,6 +337,13 @@ pub extern "C" fn sqlite3_prepare_v2(
         unsafe { *pzTail = "\0".as_ptr() as *const c_char };
     }
     SQLITE_OK
+}
+
+#[no_mangle]
+pub extern "C" fn sqlite3_bind_parameter_count(_stmt: *mut sqlite3_stmt) -> c_int {
+    trace!("Bind count");
+    tracing::warn!("STUB sqlite3_bind_parameter_count");
+    1
 }
 
 #[no_mangle]
@@ -492,16 +511,46 @@ pub extern "C" fn sqlite3_column_count(stmt: *mut sqlite3_stmt) -> c_int {
     trace!("TRACE sqlite3_column_count");
     let stmt = to_stmt(stmt);
     if let Some(metadata) = stmt.metadata.as_ref() {
+        trace!("Count: {}", metadata.col_types.len());
         metadata.col_types.len().try_into().unwrap()
+    } else if stmt.sql.contains("select null as TABLE_CAT") {
+        // FIXME: too hacky to comment
+        trace!("Fake count 1");
+        1
+    } else if stmt
+        .sql
+        .contains("select null as TABLE_SCHEM, null as TABLE_CATALOG")
+    {
+        trace!("Fake count 2");
+        2
     } else {
+        trace!("Count: 0 (no metadata)");
         0
     }
 }
 
 #[no_mangle]
-pub extern "C" fn sqlite3_column_name(_stmt: *mut sqlite3_stmt, _n: c_int) -> *const c_char {
-    trace!("STUB sqlite3_column_name");
-    std::ptr::null()
+pub extern "C" fn sqlite3_column_name(stmt: *mut sqlite3_stmt, n: c_int) -> *const c_char {
+    let stmt = to_stmt(stmt);
+    if let Some(metadata) = stmt.metadata.as_ref() {
+        trace!("Column names: {:?}; n = {n}", metadata.col_names);
+        trace!(
+            "Name: {}",
+            metadata
+                .col_names
+                .get(n as usize)
+                .unwrap_or(&"(empty)".to_string())
+        );
+        metadata
+            .col_names
+            .get(n as usize)
+            .map(|s| s.as_ptr() as *const c_char)
+            .unwrap_or("\0".as_ptr() as *const c_char) // FIXME: does not have the trailing \0 character
+    } else {
+        // FIXME: we need to parse it
+        trace!("Column name: (empty) (no metadata)");
+        "\0".as_ptr() as *const c_char
+    }
 }
 
 const SQLITE_INTEGER: c_int = 1;
@@ -607,7 +656,6 @@ define_stub!(sqlite3_backup_init);
 define_stub!(sqlite3_backup_pagecount);
 define_stub!(sqlite3_backup_remaining);
 define_stub!(sqlite3_backup_step);
-define_stub!(sqlite3_bind_parameter_count);
 define_stub!(sqlite3_bind_parameter_index);
 define_stub!(sqlite3_bind_parameter_name);
 define_stub!(sqlite3_blob_bytes);
