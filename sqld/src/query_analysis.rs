@@ -125,17 +125,23 @@ impl Statement {
     }
 
     pub fn parse(s: &str) -> impl Iterator<Item = Result<Self>> + '_ {
+        println!("Statement: {s}");
         fn parse_inner(c: Cmd) -> Result<Statement> {
-            let kind =
-                StmtKind::kind(&c).ok_or_else(|| anyhow::anyhow!("unsupported statement"))?;
+            let kind = StmtKind::kind(&c).unwrap_or(StmtKind::Read);
             let is_iud = matches!(
                 c,
                 Cmd::Stmt(Stmt::Insert { .. } | Stmt::Update { .. } | Stmt::Delete { .. })
             );
             let is_insert = matches!(c, Cmd::Stmt(Stmt::Insert { .. }));
 
+            let c = c
+                .to_string()
+                .replace("sqlite\\_%", "sqlite_%")
+                .replace("'\\%'", "'%'")
+                .replace("ESCAPE '\\'", "");
+            println!("Statement after replacing: {c}");
             Ok(Statement {
-                stmt: c.to_string(),
+                stmt: c,
                 kind,
                 is_iud,
                 is_insert,
