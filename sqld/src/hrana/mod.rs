@@ -17,7 +17,7 @@ pub use self::stmt::{
 mod batch;
 mod conn;
 mod handshake;
-pub mod proto;
+pub use hrana_proto as proto;
 mod session;
 mod stmt;
 

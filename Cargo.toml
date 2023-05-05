@@ -7,4 +7,5 @@ members = [
     "sqld",
     "sqld-libsql-bindings",
     "testing/end-to-end",
+    "hrana-proto"
 ]
