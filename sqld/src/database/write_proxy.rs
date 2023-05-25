@@ -84,7 +84,7 @@ impl WriteProxyDatabase {
         stats: Stats,
         applied_frame_no_receiver: watch::Receiver<FrameNo>,
     ) -> Result<Self> {
-        let read_db = LibSqlDb::new(path, extensions, (), false, stats)?;
+        let read_db = LibSqlDb::new(path, extensions, (), stats, false)?;
         Ok(Self {
             read_db,
             write_proxy,

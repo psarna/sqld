@@ -133,14 +133,14 @@ impl LibSqlDb {
         path: impl AsRef<Path> + Send + 'static,
         extensions: Vec<PathBuf>,
         wal_hook: impl WalHook + Send + Clone + 'static,
-        with_bottomless: bool,
         stats: Stats,
+        with_bottomless: bool,
     ) -> crate::Result<Self> {
         let (sender, receiver) = crossbeam::channel::unbounded::<Message>();
 
         tokio::task::spawn_blocking(move || {
             let mut connection =
-                Connection::new(path.as_ref(), extensions, wal_hook, with_bottomless, stats)
+                Connection::new(path.as_ref(), extensions, wal_hook, stats, with_bottomless)
                     .unwrap();
             loop {
                 let message = match connection.state.deadline() {
@@ -199,8 +199,8 @@ impl Connection {
         path: &Path,
         extensions: Vec<PathBuf>,
         wal_hook: impl WalHook + Send + Clone + 'static,
-        with_bottomless: bool,
         stats: Stats,
+        with_bottomless: bool,
     ) -> anyhow::Result<Self> {
         let this = Self {
             conn: open_db(path, wal_hook, with_bottomless)?,

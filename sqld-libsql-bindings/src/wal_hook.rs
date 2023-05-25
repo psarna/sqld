@@ -1,7 +1,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 use std::ffi::{c_char, c_int, c_void};
 
-use super::ffi::{libsql_wal_methods, sqlite3_file, sqlite3_vfs, types::*, PgHdr, Wal};
+use super::ffi::{libsql_wal_methods, sqlite3, sqlite3_file, sqlite3_vfs, types::*, PgHdr, Wal};
 
 /// The `WalHook` trait allows to intercept WAL method call.
 ///
@@ -50,6 +50,45 @@ pub unsafe trait WalHook {
     ) -> i32 {
         unsafe { orig(wal, func, ctx) }
     }
+
+    fn on_savepoint_undo(
+        &mut self,
+        wal: *mut Wal,
+        wal_data: *mut u32,
+        orig: XWalSavePointUndoFn,
+    ) -> i32 {
+        unsafe { orig(wal, wal_data) }
+    }
+
+    fn on_checkpoint(
+        &mut self,
+        wal: *mut Wal,
+        db: *mut sqlite3,
+        emode: i32,
+        busy_handler: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+        busy_arg: *mut c_void,
+        sync_flags: i32,
+        n_buf: i32,
+        z_buf: *mut u8,
+        frames_in_wal: *mut i32,
+        backfilled_frames: *mut i32,
+        orig: XWalCheckpointFn,
+    ) -> i32 {
+        unsafe {
+            orig(
+                wal,
+                db,
+                emode,
+                busy_handler,
+                busy_arg,
+                sync_flags,
+                n_buf,
+                z_buf,
+                frames_in_wal,
+                backfilled_frames,
+            )
+        }
+    }
 }
 
 /// Wal implemementation that just proxies calls to the wrapped WAL methods implementation
@@ -71,9 +110,12 @@ impl WalMethodsHook {
 
     pub fn wrap(
         default_methods: *mut libsql_wal_methods,
-        maybe_bottomless_methods: *mut libsql_wal_methods,
+        #[cfg(feature = "bottomless")] replicator: *mut bottomless::replicator::Replicator,
         hook: impl WalHook + 'static,
     ) -> OwnedWalMethods {
+        #[cfg(feature = "bottomless")]
+        tracing::debug!("Bottomless replicator pointer: {replicator:?}");
+
         let name = Self::METHODS_NAME.as_ptr() as *const _;
         let wal_methods = WalMethodsHook {
             methods: libsql_wal_methods {
@@ -112,8 +154,9 @@ impl WalMethodsHook {
                 bUsesShm: 0,
                 pNext: std::ptr::null_mut(),
             },
-            underlying_methods_for_bottomless: default_methods,
-            underlying_methods: maybe_bottomless_methods,
+            #[cfg(feature = "bottomless")]
+            replicator,
+            underlying_methods: default_methods,
             hook: Box::new(hook),
         };
 
@@ -345,9 +388,9 @@ pub extern "C" fn xPreMainDbOpen(methods: *mut libsql_wal_methods, path: *const 
 pub struct WalMethodsHook {
     pub methods: libsql_wal_methods,
 
-    // extra-field used by our bottomless storage for nested WAL methods
-    underlying_methods_for_bottomless: *mut libsql_wal_methods,
     // user data
     underlying_methods: *mut libsql_wal_methods,
+    #[cfg(feature = "bottomless")]
+    replicator: *mut bottomless::replicator::Replicator,
     hook: Box<dyn WalHook>,
 }

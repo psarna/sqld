@@ -6,6 +6,8 @@ pub mod wal_hook;
 use std::ops::Deref;
 
 use anyhow::ensure;
+#[cfg(feature = "bottomless")]
+use once_cell::sync::OnceCell;
 use wal_hook::OwnedWalMethods;
 
 use crate::{
@@ -17,12 +19,9 @@ use self::{
     wal_hook::WalHook,
 };
 
-pub fn get_orig_wal_methods(with_bottomless: bool) -> anyhow::Result<*mut libsql_wal_methods> {
-    let orig: *mut libsql_wal_methods = if with_bottomless {
-        unsafe { libsql_wal_methods_find("bottomless\0".as_ptr() as *const _) }
-    } else {
-        unsafe { libsql_wal_methods_find(std::ptr::null()) }
-    };
+pub fn get_orig_wal_methods() -> anyhow::Result<*mut libsql_wal_methods> {
+    let orig: *mut libsql_wal_methods = unsafe { libsql_wal_methods_find(std::ptr::null()) };
+
     if orig.is_null() {
         anyhow::bail!("no underlying methods");
     }
@@ -45,6 +44,49 @@ impl Deref for Connection {
     }
 }
 
+#[cfg(feature = "bottomless")]
+static BOTTOMLESS_REPLICATOR: OnceCell<Option<Box<bottomless::replicator::Replicator>>> =
+    OnceCell::new();
+
+#[cfg(feature = "bottomless")]
+pub async fn init_bottomless_replicator(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
+    tracing::debug!("Initializing bottomless replication");
+    let mut replicator =
+        bottomless::replicator::Replicator::create(bottomless::replicator::Options {
+            create_bucket_if_not_exists: true,
+            verify_crc: false,
+            use_compression: false,
+        })
+        .await?;
+
+    // NOTICE: LIBSQL_BOTTOMLESS_DATABASE_ID env variable can be used
+    // to pass an additional prefix for the database identifier
+    replicator.register_db(
+        path.as_ref()
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid db path"))?
+            .to_owned(),
+    );
+
+    match replicator.restore().await? {
+        bottomless::replicator::RestoreAction::None => (),
+        bottomless::replicator::RestoreAction::SnapshotMainDbFile => {
+            replicator.new_generation();
+            replicator.snapshot_main_db_file().await?;
+            // Restoration process only leaves the local WAL file if it was
+            // detected to be newer than its remote counterpart.
+            replicator.maybe_replicate_wal().await?
+        }
+        bottomless::replicator::RestoreAction::ReuseGeneration(gen) => {
+            replicator.set_generation(gen);
+        }
+    }
+
+    BOTTOMLESS_REPLICATOR
+        .set(Some(Box::new(replicator)))
+        .map_err(|_| anyhow::anyhow!("wal_methods initialized twice"))
+}
+
 // Registering WAL methods may be subject to race with the later call to libsql_wal_methods_find,
 // if we overwrite methods with the same name. A short-term solution is to force register+find
 // to be atomic.
@@ -62,10 +104,29 @@ pub fn open_with_regular_wal(
 ) -> anyhow::Result<Connection> {
     let opening_lock = DB_OPENING_MUTEX.lock();
     let path = path.as_ref().join("data");
+
+    assert!(cfg!(feature = "bottomless") || !with_bottomless);
+
     let mut wal_methods = unsafe {
-        let default_methods = get_orig_wal_methods(false)?;
-        let maybe_bottomless_methods = get_orig_wal_methods(with_bottomless)?;
-        let mut wrapped = WalMethodsHook::wrap(default_methods, maybe_bottomless_methods, wal_hook);
+        let default_methods = get_orig_wal_methods()?;
+        #[cfg(feature = "bottomless")]
+        let replicator = if with_bottomless {
+            // NOTICE: replicator lives as long as the progrma, so it's passed to C code as a pointer
+            BOTTOMLESS_REPLICATOR
+                .get()
+                .ok_or_else(|| anyhow::anyhow!("bottomless replicator not initialized"))?
+                .as_ref()
+                .map(|r| &*r as *const _ as *mut _)
+                .unwrap_or_else(|| std::ptr::null_mut())
+        } else {
+            std::ptr::null_mut()
+        };
+        let mut wrapped = WalMethodsHook::wrap(
+            default_methods,
+            #[cfg(feature = "bottomless")]
+            replicator,
+            wal_hook,
+        );
         let res = libsql_wal_methods_register(wrapped.as_ptr());
         ensure!(res == 0, "failed to register WAL methods");
         wrapped
