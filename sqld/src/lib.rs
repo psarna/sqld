@@ -337,6 +337,8 @@ async fn start_primary(
     join_set: &mut JoinSet<anyhow::Result<()>>,
     idle_shutdown_layer: Option<IdleShutdownLayer>,
     stats: Stats,
+    #[cfg(feature = "bottomless")]
+    bottomless_replicator_ptr: *mut bottomless::replicator::Replicator,
 ) -> anyhow::Result<()> {
     let is_fresh_db = check_fresh_db(&config.db_path);
     let logger = Arc::new(ReplicationLogger::open(
@@ -345,10 +347,6 @@ async fn start_primary(
     )?);
     let logger_clone = logger.clone();
     let path_clone = config.db_path.clone();
-    #[cfg(feature = "bottomless")]
-    let enable_bottomless = config.enable_bottomless_replication;
-    #[cfg(not(feature = "bottomless"))]
-    let enable_bottomless = false;
     let hook = ReplicationLoggerHook::new(logger.clone());
 
     // load dump is necessary
@@ -374,8 +372,9 @@ async fn start_primary(
                     db_path,
                     valid_extensions,
                     hook,
-                    enable_bottomless,
                     stats_clone,
+                    #[cfg(feature = "bottomless")]
+                    bottomless_replicator_ptr,
                 )
             }
         })
@@ -440,11 +439,6 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
             .map_err(|_| anyhow::anyhow!("wal_methods initialized twice"))?;
     }
 
-    #[cfg(feature = "bottomless")]
-    if config.enable_bottomless_replication {
-        bottomless::static_init::register_bottomless_methods();
-    }
-
     if let Some(soft_limit_mb) = config.soft_heap_limit_mb {
         tracing::warn!("Setting soft heap limit to {soft_limit_mb}MiB");
         unsafe {
@@ -457,6 +451,15 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
             sqld_libsql_bindings::ffi::sqlite3_hard_heap_limit64(hard_limit_mb as i64 * 1024 * 1024)
         };
     }
+
+    #[cfg(feature = "bottomless")]
+    let replicator_ptr = if config.enable_bottomless_replication {
+        tracing::info!("Bottomless replication enabled");
+        Box::into_raw(Box::new(bottomless::replicator::Replicator::new()))
+    } else {
+        tracing::info!("Bottomless replication not enabled");
+        std::ptr::null_mut()
+    };
 
     loop {
         if !config.db_path.exists() {
@@ -475,7 +478,17 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
 
         match config.writer_rpc_addr {
             Some(_) => start_replica(&config, &mut join_set, idle_shutdown_layer, stats).await?,
-            None => start_primary(&config, &mut join_set, idle_shutdown_layer, stats).await?,
+            None => {
+                start_primary(
+                    &config,
+                    &mut join_set,
+                    idle_shutdown_layer,
+                    stats,
+                    #[cfg(feature = "bottomless")]
+                    replicator_ptr,
+                )
+                .await?
+            }
         }
 
         let reset = HARD_RESET.clone();

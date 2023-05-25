@@ -88,7 +88,8 @@ macro_rules! ok_or_exit {
 pub fn open_db(
     path: &Path,
     wal_hook: impl WalHook + Send + Clone + 'static,
-    with_bottomless: bool,
+    #[cfg(feature = "bottomless")]
+    bottomless_replicator_ptr: *mut bottomless::replicator::Replicator,
 ) -> anyhow::Result<sqld_libsql_bindings::Connection> {
     let mut retries = 0;
     loop {
@@ -109,7 +110,8 @@ pub fn open_db(
                     | OpenFlags::SQLITE_OPEN_URI
                     | OpenFlags::SQLITE_OPEN_NO_MUTEX,
                 wal_hook.clone(),
-                with_bottomless,
+                #[cfg(feature = "bottomless")]
+                bottomless_replicator_ptr,
             ),
         };
 
@@ -121,7 +123,8 @@ pub fn open_db(
                 | OpenFlags::SQLITE_OPEN_URI
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             wal_hook.clone(),
-            with_bottomless,
+            #[cfg(feature = "bottomless")]
+            bottomless_replicator_ptr,
         );
 
         match conn_result {
@@ -155,15 +158,22 @@ impl LibSqlDb {
         path: impl AsRef<Path> + Send + 'static,
         extensions: Vec<PathBuf>,
         wal_hook: impl WalHook + Send + Clone + 'static,
-        with_bottomless: bool,
         stats: Stats,
+        #[cfg(feature = "bottomless")]
+        bottomless_replicator_ptr: *mut bottomless::replicator::Replicator,
     ) -> crate::Result<Self> {
         let (sender, receiver) = crossbeam::channel::unbounded::<Message>();
 
         tokio::task::spawn_blocking(move || {
-            let mut connection =
-                Connection::new(path.as_ref(), extensions, wal_hook, with_bottomless, stats)
-                    .unwrap();
+            let mut connection = Connection::new(
+                path.as_ref(),
+                extensions,
+                wal_hook,
+                stats,
+                #[cfg(feature = "bottomless")]
+                bottomless_replicator_ptr,
+            )
+            .unwrap();
             loop {
                 let message = match connection.state.deadline() {
                     Some(deadline) => match receiver.recv_deadline(deadline) {
@@ -221,11 +231,17 @@ impl Connection {
         path: &Path,
         extensions: Vec<PathBuf>,
         wal_hook: impl WalHook + Send + Clone + 'static,
-        with_bottomless: bool,
         stats: Stats,
+        #[cfg(feature = "bottomless")]
+        bottomless_replicator_ptr: *mut bottomless::replicator::Replicator,
     ) -> anyhow::Result<Self> {
         let this = Self {
-            conn: open_db(path, wal_hook, with_bottomless)?,
+            conn: open_db(
+                path,
+                wal_hook,
+                #[cfg(feature = "bottomless")]
+                bottomless_replicator_ptr,
+            )?,
             state: ConnectionState::initial(),
             timed_out: false,
             stats,

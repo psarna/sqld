@@ -19,12 +19,10 @@ use self::{
     wal_hook::WalHook,
 };
 
-pub fn get_orig_wal_methods(with_bottomless: bool) -> anyhow::Result<*mut libsql_wal_methods> {
-    let orig: *mut libsql_wal_methods = if with_bottomless {
-        unsafe { libsql_wal_methods_find("bottomless\0".as_ptr() as *const _) }
-    } else {
-        unsafe { libsql_wal_methods_find(std::ptr::null()) }
-    };
+pub fn get_orig_wal_methods() -> anyhow::Result<*mut libsql_wal_methods> {
+    let orig: *mut libsql_wal_methods = 
+        unsafe { libsql_wal_methods_find(std::ptr::null()) };
+
     if orig.is_null() {
         anyhow::bail!("no underlying methods");
     }
@@ -60,14 +58,13 @@ pub fn open_with_regular_wal(
     path: impl AsRef<std::path::Path>,
     flags: rusqlite::OpenFlags,
     wal_hook: impl WalHook + 'static,
-    with_bottomless: bool,
+    #[cfg(feature = "bottomless")] bottomless_replicator_ptr: *mut bottomless::replicator::Replicator,
 ) -> anyhow::Result<Connection> {
     let opening_lock = DB_OPENING_MUTEX.lock();
     let path = path.as_ref().join("data");
     let mut wal_methods = unsafe {
-        let default_methods = get_orig_wal_methods(false)?;
-        let maybe_bottomless_methods = get_orig_wal_methods(with_bottomless)?;
-        let mut wrapped = WalMethodsHook::wrap(default_methods, maybe_bottomless_methods, wal_hook);
+        let default_methods = get_orig_wal_methods()?;
+        let mut wrapped = WalMethodsHook::wrap(default_methods, #[cfg(feature = "bottomless")] bottomless_replicator_ptr, wal_hook);
         let res = libsql_wal_methods_register(wrapped.as_ptr());
         ensure!(res == 0, "failed to register WAL methods");
         wrapped

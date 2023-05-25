@@ -71,7 +71,7 @@ impl WalMethodsHook {
 
     pub fn wrap(
         default_methods: *mut libsql_wal_methods,
-        maybe_bottomless_methods: *mut libsql_wal_methods,
+        #[cfg(feature = "bottomless")] bottomless_replicator_ptr: *mut bottomless::replicator::Replicator,
         hook: impl WalHook + 'static,
     ) -> OwnedWalMethods {
         let name = Self::METHODS_NAME.as_ptr() as *const _;
@@ -112,8 +112,8 @@ impl WalMethodsHook {
                 bUsesShm: 0,
                 pNext: std::ptr::null_mut(),
             },
-            underlying_methods_for_bottomless: default_methods,
-            underlying_methods: maybe_bottomless_methods,
+            #[cfg(feature = "bottomless")] bottomless_replicator_ptr,
+            underlying_methods: default_methods,
             hook: Box::new(hook),
         };
 
@@ -345,9 +345,8 @@ pub extern "C" fn xPreMainDbOpen(methods: *mut libsql_wal_methods, path: *const 
 pub struct WalMethodsHook {
     pub methods: libsql_wal_methods,
 
-    // extra-field used by our bottomless storage for nested WAL methods
-    underlying_methods_for_bottomless: *mut libsql_wal_methods,
     // user data
     underlying_methods: *mut libsql_wal_methods,
+    #[cfg(feature = "bottomless")] bottomless_replicator_ptr: *mut bottomless::replicator::Replicator,
     hook: Box<dyn WalHook>,
 }
