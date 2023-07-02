@@ -151,9 +151,11 @@ impl<'a> FrameInjector<'a> {
     fn inject_frames(&mut self, frames: Frames) -> anyhow::Result<FrameNo> {
         self.ctx.set_frames(frames);
 
+        self.conn.pragma_update(None, "writable_schema", "on")?;
         let _ = self
             .conn
             .execute("create table if not exists __dummy__ (dummy)", ());
+        self.conn.pragma_update(None, "writable_schema", "reset")?;
 
         self.ctx.take_result()
     }
