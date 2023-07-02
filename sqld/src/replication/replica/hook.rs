@@ -205,7 +205,7 @@ fn make_page_header<'a>(frames: impl Iterator<Item = &'a FrameBorrowed>) -> (*mu
             pPager: std::ptr::null_mut(),
             pgno: frame.header().page_no,
             pageHash: 0,
-            flags: 0,
+            flags: 0x02, // PGHDR_DIRTY - it works without the flag, but why risk it
             nRef: 0,
             pDirtyNext: std::ptr::null_mut(),
             pDirtyPrev: std::ptr::null_mut(),
