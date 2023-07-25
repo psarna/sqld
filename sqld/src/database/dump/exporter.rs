@@ -4,8 +4,7 @@ use std::fmt::{Display, Write as _};
 use std::io::Write;
 
 use anyhow::bail;
-use rusqlite::types::ValueRef;
-use rusqlite::OptionalExtension;
+use libsql::params::ValueRef;
 
 struct DumpState<W: Write> {
     /// true if db is in writable_schema mode
@@ -13,12 +12,12 @@ struct DumpState<W: Write> {
     writer: W,
 }
 
-use rusqlite::ffi::{sqlite3_keyword_check, sqlite3_table_column_metadata, SQLITE_OK};
+use sqld_libsql_bindings::ffi::{sqlite3_keyword_check, sqlite3_table_column_metadata, SQLITE_OK};
 
 impl<W: Write> DumpState<W> {
     fn run_schema_dump_query(
         &mut self,
-        txn: &rusqlite::Connection,
+        txn: &libsql::Connection,
         stmt: &str,
     ) -> anyhow::Result<()> {
         let mut stmt = txn.prepare(stmt)?;
@@ -115,7 +114,7 @@ impl<W: Write> DumpState<W> {
         Ok(())
     }
 
-    fn run_table_dump_query(&mut self, txn: &rusqlite::Connection, q: &str) -> anyhow::Result<()> {
+    fn run_table_dump_query(&mut self, txn: &libsql::Connection, q: &str) -> anyhow::Result<()> {
         let mut stmt = txn.prepare(q)?;
         let col_count = stmt.column_count();
         let mut rows = stmt.query(())?;
@@ -134,7 +133,7 @@ impl<W: Write> DumpState<W> {
 
     fn list_table_columns(
         &self,
-        txn: &rusqlite::Connection,
+        txn: &libsql::Connection,
         table: &str,
     ) -> anyhow::Result<(Option<String>, Vec<String>)> {
         let mut cols = Vec::new();
@@ -420,7 +419,7 @@ fn find_unused_str(haystack: &str, needle1: &str, needle2: &str) -> String {
     }
 }
 
-pub fn export_dump(mut db: rusqlite::Connection, writer: impl Write) -> anyhow::Result<()> {
+pub fn export_dump(mut db: libsql::Connection, writer: impl Write) -> anyhow::Result<()> {
     let mut txn = db.transaction()?;
     txn.execute("PRAGMA writable_schema=ON", ())?;
     let savepoint = txn.savepoint_with_name("dump")?;

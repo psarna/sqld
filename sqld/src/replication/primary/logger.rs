@@ -887,7 +887,7 @@ impl ReplicationLogger {
 
 fn checkpoint_db(data_path: &Path) -> anyhow::Result<()> {
     unsafe {
-        let conn = rusqlite::Connection::open(data_path)?;
+        let conn = libsql::Database::open(data_path)?.connect()?;
         conn.pragma_query(None, "page_size", |row| {
             let page_size = row.get::<_, i32>(0).unwrap();
             assert_eq!(
@@ -898,7 +898,7 @@ fn checkpoint_db(data_path: &Path) -> anyhow::Result<()> {
             Ok(())
         })?;
         let mut num_checkpointed: c_int = 0;
-        let rc = rusqlite::ffi::sqlite3_wal_checkpoint_v2(
+        let rc = sqld_libsql_bindings::ffi::sqlite3_wal_checkpoint_v2(
             conn.handle(),
             std::ptr::null(),
             SQLITE_CHECKPOINT_TRUNCATE,
