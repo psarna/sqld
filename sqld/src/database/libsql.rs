@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam::channel::RecvTimeoutError;
-use rusqlite::{ErrorCode, OpenFlags, StatementStatus};
 use sqld_libsql_bindings::wal_hook::WalMethodsHook;
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -78,18 +77,11 @@ where
     async fn try_create_db(&self) -> Result<LibSqlDb> {
         // try 100 times to acquire initial db connection.
         let mut retries = 0;
+        const BUSY: i32 = sqld_libsql_bindings::ffi::SQLITE_BUSY as std::ffi::c_int;
         loop {
             match self.create_database().await {
                 Ok(conn) => return Ok(conn),
-                Err(
-                    err @ Error::RusqliteError(rusqlite::Error::SqliteFailure(
-                        rusqlite::ffi::Error {
-                            code: ErrorCode::DatabaseBusy,
-                            ..
-                        },
-                        _,
-                    )),
-                ) => {
+                Err(err @ Error::LibsqlError(BUSY)) => {
                     if retries < 100 {
                         tracing::warn!("Database file is busy, retrying...");
                         retries += 1;
@@ -141,19 +133,20 @@ pub fn open_db<'a, W>(
     path: &Path,
     wal_methods: &'static WalMethodsHook<W>,
     hook_ctx: &'a mut W::Context,
-    flags: Option<OpenFlags>,
-) -> Result<sqld_libsql_bindings::Connection<'a>, rusqlite::Error>
+    flags: Option<std::ffi::c_int>,
+) -> Result<sqld_libsql_bindings::Connection<'a>, libsql::Error>
 where
     W: WalHook,
 {
     let flags = flags.unwrap_or(
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_URI
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        (sqld_libsql_bindings::ffi::SQLITE_OPEN_READWRITE
+            | sqld_libsql_bindings::ffi::SQLITE_OPEN_CREATE
+            | sqld_libsql_bindings::ffi::SQLITE_OPEN_URI
+            | sqld_libsql_bindings::ffi::SQLITE_OPEN_NOMUTEX) as i32,
     );
 
     sqld_libsql_bindings::Connection::open(path, flags, wal_methods, hook_ctx)
+        .map_err(|rc| libsql::Error::LibError(rc))
 }
 
 impl LibSqlDb {
@@ -260,12 +253,28 @@ impl<'a> Connection<'a> {
             builder_config,
         };
 
+        /*
+        int sqlite3_load_extension(
+          sqlite3 *db,          /* Load the extension into this database connection */
+          const char *zFile,    /* Name of the shared library containing extension */
+          const char *zProc,    /* Entry point.  Derived from zFile if 0 */
+          char **pzErrMsg       /* Put error message here if not 0 */
+        );
+
+         */
         for ext in extensions {
             unsafe {
-                let _guard = rusqlite::LoadExtensionGuard::new(&this.conn).unwrap();
-                if let Err(e) = this.conn.load_extension(&ext, None) {
+                let rc = unsafe {
+                    libsql::ffi::sqlite3_load_extension(
+                        this.conn.handle(),
+                        ext.to_str().unwrap().as_ptr() as *const _,
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                    )
+                };
+                if rc != libsql::ffi::SQLITE_OK as i32 {
                     tracing::error!("failed to load extension: {}", ext.display());
-                    Err(e)?;
+                    Err(Error::LibsqlError(rc))?;
                 }
                 tracing::debug!("Loaded extension {}", ext.display());
             }
@@ -354,7 +363,7 @@ impl<'a> Connection<'a> {
 
         let cols = stmt.columns();
         let cols_count = cols.len();
-        builder.cols_description(cols.iter())?;
+        builder.cols_description(cols.into_iter())?;
         drop(cols);
 
         query
@@ -362,12 +371,15 @@ impl<'a> Connection<'a> {
             .bind(&mut stmt)
             .map_err(Error::LibSqlInvalidQueryParams)?;
 
-        let mut qresult = stmt.raw_query();
+        // FIXME: why does execute() return Option<Rows> instead of Result<Option<Rows>>?
+        let mut qresult = stmt
+            .execute(&libsql::Params::None)
+            .ok_or(Error::Internal("Query excecution failed".to_string()))?;
         builder.begin_rows()?;
         while let Some(row) = qresult.next()? {
             builder.begin_row()?;
             for i in 0..cols_count {
-                let val = row.get_ref(i)?;
+                let val = row.get_ref(i as i32)?;
                 builder.add_row_value(val)?;
             }
             builder.finish_row()?;
@@ -400,9 +412,10 @@ impl<'a> Connection<'a> {
         let _ = self.conn.execute("ROLLBACK", ());
     }
 
-    fn update_stats(&self, stmt: &rusqlite::Statement) {
-        let rows_read = stmt.get_status(StatementStatus::RowsRead);
-        let rows_written = stmt.get_status(StatementStatus::RowsWritten);
+    fn update_stats(&self, stmt: &libsql::Statement) {
+        use sqld_libsql_bindings::ffi;
+        let rows_read = stmt.get_status(ffi::LIBSQL_STMTSTATUS_ROWS_READ as i32);
+        let rows_written = stmt.get_status(ffi::LIBSQL_STMTSTATUS_ROWS_WRITTEN as i32);
         let rows_read = if rows_read == 0 && rows_written == 0 {
             1
         } else {
@@ -417,7 +430,7 @@ impl<'a> Connection<'a> {
 
         let params = (1..=stmt.parameter_count())
             .map(|param_i| {
-                let name = stmt.parameter_name(param_i).map(|n| n.into());
+                let name = stmt.parameter_name(param_i as i32).map(|n| n.into());
                 DescribeParam { name }
             })
             .collect();

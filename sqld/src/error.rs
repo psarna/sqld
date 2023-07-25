@@ -12,7 +12,7 @@ pub enum Error {
     #[error(transparent)]
     IOError(#[from] std::io::Error),
     #[error(transparent)]
-    RusqliteError(#[from] rusqlite::Error),
+    LibsqlError(#[from] std::ffi::c_int),
     #[error("Failed to execute query via RPC. Error code: {}, message: {}", .0.code, .0.message)]
     RpcQueryError(crate::rpc::proxy::rpc::Error),
     #[error("Failed to execute queries via RPC protocol: `{0}`")]
@@ -50,5 +50,27 @@ impl From<tokio::sync::oneshot::error::RecvError> for Error {
 impl From<bincode::Error> for Error {
     fn from(other: bincode::Error) -> Self {
         Self::Internal(other.to_string())
+    }
+}
+
+impl From<libsql::Error> for Error {
+    fn from(other: libsql::Error) -> Self {
+        match other {
+            libsql::Error::ConnectionFailed(msg) => Self::Internal(msg),
+            libsql::Error::PrepareFailed(msg1, msg2) => {
+                Self::Internal(format!("Prepare failed: {msg1} {msg2}"))
+            }
+            libsql::Error::FetchRowFailed(msg) => Self::Internal(msg),
+            libsql::Error::UnknownColumnType(col, typ) => Self::Internal(format!(
+                "Unknown value type for column `{}`: `{}`",
+                col, typ
+            )),
+            libsql::Error::NullValue => Self::Internal("The value is NULL".to_string()),
+            libsql::Error::Misuse(msg) => Self::Internal(msg),
+            libsql::Error::InvalidColumnName(name) => {
+                Self::Internal(format!("Invalid column name: {}", name))
+            }
+            libsql::Error::LibError(code) => Self::LibsqlError(code),
+        }
     }
 }

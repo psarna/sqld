@@ -1,8 +1,7 @@
 use std::ffi::{c_int, CStr};
 use std::marker::PhantomData;
 
-use rusqlite::ffi::{PgHdr, SQLITE_ERROR};
-use sqld_libsql_bindings::ffi::Wal;
+use sqld_libsql_bindings::ffi::{PgHdr, Wal, SQLITE_ERROR};
 use sqld_libsql_bindings::init_static_wal_method;
 use sqld_libsql_bindings::{ffi::types::XWalFrameFn, wal_hook::WalHook};
 

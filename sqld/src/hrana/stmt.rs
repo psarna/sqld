@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use sqld_libsql_bindings::ffi;
 use std::collections::HashMap;
 
 use super::result_builder::SingleStatementBuilder;
@@ -30,13 +31,10 @@ pub enum StmtError {
     #[error("Server cannot handle additional transactions")]
     TransactionBusy,
     #[error("SQLite error: {message}")]
-    SqliteError {
-        source: rusqlite::ffi::Error,
-        message: String,
-    },
+    SqliteError { source: i32, message: String },
     #[error("SQL input error: {message} (at offset {offset})")]
     SqlInputError {
-        source: rusqlite::ffi::Error,
+        source: i32,
         message: String,
         offset: i32,
     },
@@ -202,26 +200,9 @@ pub fn stmt_error_from_sqld_error(sqld_error: SqldError) -> Result<StmtError, Sq
             StmtError::ResponseTooLarge
         }
         SqldError::Blocked(reason) => StmtError::Blocked { reason },
-        SqldError::RusqliteError(rusqlite_error) => match rusqlite_error {
-            rusqlite::Error::SqliteFailure(sqlite_error, Some(message)) => StmtError::SqliteError {
-                source: sqlite_error,
-                message,
-            },
-            rusqlite::Error::SqliteFailure(sqlite_error, None) => StmtError::SqliteError {
-                message: sqlite_error.to_string(),
-                source: sqlite_error,
-            },
-            rusqlite::Error::SqlInputError {
-                error: sqlite_error,
-                msg: message,
-                offset,
-                ..
-            } => StmtError::SqlInputError {
-                source: sqlite_error,
-                message,
-                offset,
-            },
-            rusqlite_error => return Err(SqldError::RusqliteError(rusqlite_error)),
+        SqldError::LibsqlError(rc) => StmtError::SqliteError {
+            message: libsql::errors::error_from_code(rc),
+            source: rc,
         },
         sqld_error => return Err(sqld_error),
     })
@@ -252,32 +233,31 @@ impl StmtError {
     }
 }
 
-fn sqlite_error_code(code: rusqlite::ffi::ErrorCode) -> &'static str {
-    match code {
-        rusqlite::ErrorCode::InternalMalfunction => "SQLITE_INTERNAL",
-        rusqlite::ErrorCode::PermissionDenied => "SQLITE_PERM",
-        rusqlite::ErrorCode::OperationAborted => "SQLITE_ABORT",
-        rusqlite::ErrorCode::DatabaseBusy => "SQLITE_BUSY",
-        rusqlite::ErrorCode::DatabaseLocked => "SQLITE_LOCKED",
-        rusqlite::ErrorCode::OutOfMemory => "SQLITE_NOMEM",
-        rusqlite::ErrorCode::ReadOnly => "SQLITE_READONLY",
-        rusqlite::ErrorCode::OperationInterrupted => "SQLITE_INTERRUPT",
-        rusqlite::ErrorCode::SystemIoFailure => "SQLITE_IOERR",
-        rusqlite::ErrorCode::DatabaseCorrupt => "SQLITE_CORRUPT",
-        rusqlite::ErrorCode::NotFound => "SQLITE_NOTFOUND",
-        rusqlite::ErrorCode::DiskFull => "SQLITE_FULL",
-        rusqlite::ErrorCode::CannotOpen => "SQLITE_CANTOPEN",
-        rusqlite::ErrorCode::FileLockingProtocolFailed => "SQLITE_PROTOCOL",
-        rusqlite::ErrorCode::SchemaChanged => "SQLITE_SCHEMA",
-        rusqlite::ErrorCode::TooBig => "SQLITE_TOOBIG",
-        rusqlite::ErrorCode::ConstraintViolation => "SQLITE_CONSTRAINT",
-        rusqlite::ErrorCode::TypeMismatch => "SQLITE_MISMATCH",
-        rusqlite::ErrorCode::ApiMisuse => "SQLITE_MISUSE",
-        rusqlite::ErrorCode::NoLargeFileSupport => "SQLITE_NOLFS",
-        rusqlite::ErrorCode::AuthorizationForStatementDenied => "SQLITE_AUTH",
-        rusqlite::ErrorCode::ParameterOutOfRange => "SQLITE_RANGE",
-        rusqlite::ErrorCode::NotADatabase => "SQLITE_NOTADB",
-        rusqlite::ErrorCode::Unknown => "SQLITE_UNKNOWN",
+fn sqlite_error_code(code: std::ffi::c_int) -> &'static str {
+    match code as u32 {
+        ffi::SQLITE_INTERNAL => "SQLITE_INTERNAL",
+        ffi::SQLITE_PERM => "SQLITE_PERM",
+        ffi::SQLITE_ABORT => "SQLITE_ABORT",
+        ffi::SQLITE_BUSY => "SQLITE_BUSY",
+        ffi::SQLITE_LOCKED => "SQLITE_LOCKED",
+        ffi::SQLITE_NOMEM => "SQLITE_NOMEM",
+        ffi::SQLITE_READONLY => "SQLITE_READONLY",
+        ffi::SQLITE_INTERRUPT => "SQLITE_INTERRUPT",
+        ffi::SQLITE_IOERR => "SQLITE_IOERR",
+        ffi::SQLITE_CORRUPT => "SQLITE_CORRUPT",
+        ffi::SQLITE_NOTFOUND => "SQLITE_NOTFOUND",
+        ffi::SQLITE_FULL => "SQLITE_FULL",
+        ffi::SQLITE_CANTOPEN => "SQLITE_CANTOPEN",
+        ffi::SQLITE_PROTOCOL => "SQLITE_PROTOCOL",
+        ffi::SQLITE_SCHEMA => "SQLITE_SCHEMA",
+        ffi::SQLITE_TOOBIG => "SQLITE_TOOBIG",
+        ffi::SQLITE_CONSTRAINT => "SQLITE_CONSTRAINT",
+        ffi::SQLITE_MISMATCH => "SQLITE_MISMATCH",
+        ffi::SQLITE_MISUSE => "SQLITE_MISUSE",
+        ffi::SQLITE_NOLFS => "SQLITE_NOLFS",
+        ffi::SQLITE_AUTH => "SQLITE_AUTH",
+        ffi::SQLITE_RANGE => "SQLITE_RANGE",
+        ffi::SQLITE_NOTADB => "SQLITE_NOTADB",
         _ => "SQLITE_UNKNOWN",
     }
 }
