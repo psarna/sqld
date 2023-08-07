@@ -92,6 +92,7 @@ impl Stream for FrameStream {
                         self.transition_state_next_frame();
                         self.poll_next(cx)
                     } else {
+                        return Poll::Ready(None);
                         let fut = async move {
                             notifier.changed().await?;
                             Ok(*notifier.borrow())
